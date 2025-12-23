@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESP32 Drone - Stable Land</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: Arial; margin: 20px; background: #f0f0f0; }
+        .container { max-width: 900px; margin: auto; padding: 20px; background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1 { text-align: center; color: #333; }
+        .panel { background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .status-item { display: flex; justify-content: space-between; margin: 10px 0; font-size: 17px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .control-panel { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; }
+        .btn { padding: 18px; border: none; border-radius: 8px; font-size: 18px; cursor: pointer; font-weight: bold; }
+        .btn-start { background: #28a745; color: white; }
+        .btn-stop { background: #dc3545; color: white; }
+        .btn-test { background: #ffc107; color: black; }
+        .slider-container { margin: 20px 0; }
+        label { font-size: 18px; font-weight: bold; }
+        input[type=range] { width: 100%; height: 40px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚁 ESP32 Drone Rig - Final Stable</h1>
+        <p style="text-align:center; color:#28a745;">Land hoạt động mọi lần | Untwist ngay lập tức</p>
+        
+        <div class="grid-2">
+            <div class="panel">
+                <h3>Flight Status</h3>
+                <div class="status-item"><span>State:</span><span id="state">IDLE</span></div>
+                <div class="status-item"><span>Current Alt:</span><span id="altitude">0.0 cm</span></div>
+                <div class="status-item"><span>Target Alt:</span><span id="target">12.0 cm</span></div>
+                <div class="status-item"><span>Motor Power:</span><span id="motor">0 / 130</span></div>
+                <div class="status-item"><span>Avg Error:</span><span id="avg_error">0.00 cm</span></div>
+                <div class="status-item"><span>Max Error:</span><span id="max_error">0.00 cm</span></div>
+            </div>
+
+            <div class="panel">
+                <h3>PID Parameters</h3>
+                <div class="status-item"><span>Kp:</span><span id="kp">18.0</span></div>
+                <div class="status-item"><span>Ki:</span><span id="ki">1.5</span></div>
+                <div class="status-item"><span>Kd:</span><span id="kd">3.5</span></div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>MPU6050 Sensors</h3>
+            <div class="grid-2">
+                <div>
+                    <h4>Angles</h4>
+                    <div class="status-item"><span>Pitch:</span><span id="pitch">0.0°</span></div>
+                    <div class="status-item"><span>Roll:</span><span id="roll">0.0°</span></div>
+                </div>
+                <div>
+                    <h4>Accel (g)</h4>
+                    <div class="status-item"><span>X:</span><span id="accX">0.00</span></div>
+                    <div class="status-item"><span>Y:</span><span id="accY">0.00</span></div>
+                    <div class="status-item"><span>Z:</span><span id="accZ">1.00</span></div>
+                </div>
+            </div>
+            <div class="grid-2" style="margin-top:15px;">
+                <div>
+                    <h4>Gyro (°/s)</h4>
+                    <div class="status-item"><span>X:</span><span id="gyroX">0.0</span></div>
+                    <div class="status-item"><span>Y:</span><span id="gyroY">0.0</span></div>
+                    <div class="status-item"><span>Z:</span><span id="gyroZ">0.0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Set Target Altitude (5 - 15 cm)</h3>
+            <div class="slider-container">
+                <label for="altSlider">Target: <span id="altValue">12.0</span> cm</label>
+                <input type="range" id="altSlider" min="5" max="15" value="12" step="0.5">
+            </div>
+        </div>
+
+        <div class="panel">
+            <h3>Control</h3>
+            <div class="control-panel">
+                <button class="btn btn-start" onclick="sendCommand('start')">▶ Takeoff</button>
+                <button class="btn btn-stop" onclick="sendCommand('stop')">⏹ Land + Untwist</button>
+                <button class="btn btn-test" onclick="sendCommand('calibrate')">📐 Calibrate MPU</button>
+                <button class="btn btn-test" onclick="sendCommand('test')">⚡ Motor Test</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const altSlider = document.getElementById('altSlider');
+        const altValue = document.getElementById('altValue');
+        
+        altSlider.addEventListener('input', function() {
+            altValue.textContent = this.value;
+            fetch('/cmd?altitude=' + this.value);
+        });
+
+        function sendCommand(cmd) {
+            fetch('/cmd?command=' + cmd);
+        }
+
+        function updateStatus() {
+            fetch('/data')
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById('state').textContent = data.state;
+                    document.getElementById('altitude').textContent = data.altitude.toFixed(1) + ' cm';
+                    document.getElementById('target').textContent = data.target.toFixed(1) + ' cm';
+                    document.getElementById('motor').textContent = data.motor + ' / 130';
+                    document.getElementById('avg_error').textContent = data.avg_error.toFixed(2) + ' cm';
+                    document.getElementById('max_error').textContent = data.max_error.toFixed(2) + ' cm';
+                    document.getElementById('kp').textContent = data.kp.toFixed(2);
+                    document.getElementById('ki').textContent = data.ki.toFixed(3);
+                    document.getElementById('kd').textContent = data.kd.toFixed(2);
+                    document.getElementById('pitch').textContent = data.pitch.toFixed(1) + '°';
+                    document.getElementById('roll').textContent = data.roll.toFixed(1) + '°';
+                    document.getElementById('accX').textContent = data.accX.toFixed(2);
+                    document.getElementById('accY').textContent = data.accY.toFixed(2);
+                    document.getElementById('accZ').textContent = data.accZ.toFixed(2);
+                    document.getElementById('gyroX').textContent = data.gyroX.toFixed(1);
+                    document.getElementById('gyroY').textContent = data.gyroY.toFixed(1);
+                    document.getElementById('gyroZ').textContent = data.gyroZ.toFixed(1);
+                    
+                    if (Math.abs(altSlider.value - data.target) > 0.1) {
+                        altSlider.value = data.target;
+                        altValue.textContent = data.target.toFixed(1);
+                    }
+                });
+        }
+
+        setInterval(updateStatus, 800);
+        updateStatus();
+    </script>
+</body>
+</html>
