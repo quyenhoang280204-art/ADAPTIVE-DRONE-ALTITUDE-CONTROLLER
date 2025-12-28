@@ -5,21 +5,43 @@
 #include <ctime>
 
 // ================== PARAMETERS ==================
-const double DT = 0.02;          // 20ms
-const double TARGET_ALT = 15.0;  // cm
+const double DT = 0.02; // 20ms
+const double TARGET_ALT = 15.0; // cm
 const double KP = 22.0;
 const double KI = 1.8;
 const double KD = 4.0;
-const double MASS = 0.15;        // kg
+const double MASS = 0.15; // kg
 const double GRAVITY = 9.81;
 const double THRUST_SCALE = 0.02;
 const double DRAG_COEFF = 0.1;
-const double NOISE_AMPLITUDE = 0.3; // cm, giống Simulink
+const double NOISE_AMPLITUDE = 0.3; // cm
 
 // Pitch disturbance: sine wave 10 độ, 0.2 Hz
 double get_pitch_disturbance(double time) {
     return 10.0 * sin(0.4 * M_PI * time); // freq = 0.2 Hz
 }
+
+// ================== SIMPLE KALMAN FILTER CLASS ==================
+class SimpleKalmanFilter {
+private:
+    double err_measure;
+    double err_estimate;
+    double q;
+    double current_estimate;
+    double last_estimate;
+
+public:
+    SimpleKalmanFilter(double mea_e, double est_e, double q_val)
+        : err_measure(mea_e), err_estimate(est_e), q(q_val), current_estimate(0.0), last_estimate(0.0) {}
+
+    double updateEstimate(double mea) {
+        double kg = err_estimate / (err_estimate + err_measure);
+        current_estimate = last_estimate + kg * (mea - last_estimate);
+        err_estimate = (1.0 - kg) * err_estimate + fabs(last_estimate - current_estimate) * q;
+        last_estimate = current_estimate;
+        return current_estimate;
+    }
+};
 
 // ================== PID MODULE ==================
 SC_MODULE(PID_Controller) {
@@ -38,8 +60,7 @@ SC_MODULE(PID_Controller) {
             double error = TARGET_ALT - current_alt;
 
             integral += error * DT;
-            // Simple anti-windup
-            integral = std::max(-100.0, std::min(100.0, integral));
+            integral = std::max(-100.0, std::min(100.0, integral)); // anti-windup
 
             double derivative = (error - prev_error) / DT;
             prev_error = error;
@@ -66,6 +87,7 @@ SC_MODULE(TiltCompensation) {
     void process() {
         while (true) {
             wait();
+
             double t = sc_time_stamp().to_seconds();
             double pitch_deg = get_pitch_disturbance(t);
             double pitch_rad = pitch_deg * M_PI / 180.0;
@@ -84,7 +106,7 @@ SC_MODULE(TiltCompensation) {
     }
 };
 
-// ================== PLANT MODULE ==================
+// ================== PLANT MODULE WITH KALMAN FILTER ==================
 SC_MODULE(Plant) {
     sc_in<bool> clk;
     sc_in<double> thrust_in;
@@ -93,8 +115,11 @@ SC_MODULE(Plant) {
     double velocity = 0.0;
     double altitude = 0.0;
 
+    SimpleKalmanFilter kalman;  // Kalman Filter instance
+
     void dynamics() {
         std::srand(std::time(nullptr)); // seed random
+
         while (true) {
             wait();
 
@@ -112,15 +137,18 @@ SC_MODULE(Plant) {
                 velocity = 0;
             }
 
-            // Band-limited white noise approximation
+            // Raw noise
             double noise = NOISE_AMPLITUDE * ((double)std::rand() / RAND_MAX - 0.5) * 2.0;
-            double measured_alt = altitude + noise;
+            double measured_raw = altitude + noise;
+
+            // Apply Kalman Filter
+            double measured_alt = kalman.updateEstimate(measured_raw);
 
             altitude_out.write(measured_alt);
         }
     }
 
-    SC_CTOR(Plant) {
+    SC_CTOR(Plant) : kalman(2.0, 2.0, 0.1) {  // Parameters giống ESP32
         SC_THREAD(dynamics);
         sensitive << clk.pos();
     }
@@ -134,8 +162,7 @@ SC_MODULE(Monitor) {
     sc_in<double> thrust_corrected_in;
 
     void print() {
-        // Header
-        std::cout << "Time(s)   | Alt(cm) | Thrust_corr | Pitch(deg)" << std::endl;
+        std::cout << "Time(s) | Alt(cm) | Thrust_corr | Pitch(deg)" << std::endl;
         while (true) {
             wait();
             double t = sc_time_stamp().to_seconds();
@@ -146,12 +173,7 @@ SC_MODULE(Monitor) {
                       << thrust_corrected_in.read() << " | "
                       << pitch << std::endl;
 
-            // In ít dòng hơn để dễ đọc
-            if (((int)(t / DT)) % 25 == 0) { // mỗi 0.5s in 1 lần
-                // in liên tục cũng được nếu muốn
-            } else {
-                continue;
-            }
+            if (((int)(t / DT)) % 25 != 0) continue;  // In mỗi 0.5s
         }
     }
 
@@ -174,10 +196,9 @@ int sc_main(int argc, char* argv[]) {
     sc_signal<double> thrust_corrected_sig;
     sc_signal<double> alt_sig;
 
-    // Connections
     pid.clk(clk);
     pid.altitude_in(alt_sig);
-    pid.thrust_base_out(thrust_base_sig);
+    pid.thrust_out(thrust_base_sig);
 
     tilt.clk(clk);
     tilt.thrust_base_in(thrust_base_sig);
@@ -192,9 +213,9 @@ int sc_main(int argc, char* argv[]) {
     monitor.thrust_in(thrust_base_sig);
     monitor.thrust_corrected_in(thrust_corrected_sig);
 
-    std::cout << "Starting simulation for 30 seconds..." << std::endl;
+    std::cout << "Starting simulation for 30 seconds with Kalman Filter..." << std::endl;
     sc_start(30, SC_SEC);
-
     std::cout << "Simulation finished." << std::endl;
+
     return 0;
 }
