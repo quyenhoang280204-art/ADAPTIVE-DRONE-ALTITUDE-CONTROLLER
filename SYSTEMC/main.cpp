@@ -198,7 +198,7 @@ int sc_main(int argc, char* argv[]) {
 
     pid.clk(clk);
     pid.altitude_in(alt_sig);
-    pid.thrust_out(thrust_base_sig);
+    pid.thrust_base_out(thrust_base_sig);
 
     tilt.clk(clk);
     tilt.thrust_base_in(thrust_base_sig);
